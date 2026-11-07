@@ -1,6 +1,8 @@
 import express from 'express';
 import { hashPassword, verifyPassword, signToken, requireAuth } from './auth.js';
 import { parseAmountToCents, formatCents, isValidDate } from './money.js';
+import { rateLimit } from './rateLimit.js';
+import { landingPage } from './page.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isUniqueViolation = (err) => /UNIQUE constraint failed/.test(err?.message ?? '');
@@ -27,7 +29,15 @@ function decodeCursor(c) {
   }
 }
 
-export function createApp(db, { jwtSecret }) {
+export function createApp(db, {
+  jwtSecret,
+  // Limits on /auth/*: per client IP, and (for login) per target account, so guessing one
+  // account's password is throttled even when the attempts come from many IPs.
+  authLimit = { max: 20, windowMs: 15 * 60_000 },
+  loginEmailLimit = { max: 10, windowMs: 15 * 60_000 },
+  // Number of reverse proxies in front of the app (0/false = none); see README "Deploying".
+  trustProxy = false,
+}) {
   if (!jwtSecret) throw new Error('jwtSecret is required');
   const auth = requireAuth(jwtSecret);
 
@@ -56,12 +66,21 @@ export function createApp(db, { jwtSecret }) {
   };
 
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', trustProxy);
   app.use(express.json({ limit: '10kb' }));
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  app.get('/', (_req, res) => res.type('html').send(landingPage));
 
   // ---- Auth -----------------------------------------------------------------
-  app.post('/auth/register', (req, res) => {
+  const authIpLimiter = rateLimit(authLimit);
+  const loginEmailLimiter = rateLimit({
+    ...loginEmailLimit,
+    key: (req) => `login:${String(req.body?.email ?? '').toLowerCase().slice(0, 254)}`,
+  });
+
+  app.post('/auth/register', authIpLimiter, (req, res) => {
     const { email, password } = req.body ?? {};
     if (typeof email !== 'string' || !EMAIL_RE.test(email) || email.length > 254) {
       return res.status(400).json({ error: 'A valid email is required.' });
@@ -78,7 +97,7 @@ export function createApp(db, { jwtSecret }) {
     }
   });
 
-  app.post('/auth/login', (req, res) => {
+  app.post('/auth/login', authIpLimiter, loginEmailLimiter, (req, res) => {
     const { email, password } = req.body ?? {};
     if (typeof email !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'email and password are required.' });

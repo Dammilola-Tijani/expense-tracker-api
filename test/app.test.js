@@ -8,8 +8,10 @@ import { parseAmountToCents, formatCents, isValidDate } from '../src/money.js';
 const SECRET = 'test-secret-at-least-16-chars';
 let server, base;
 
+const HIGH = { max: 100_000, windowMs: 60_000 }; // the shared test app makes many auth calls from one IP
+
 before(() => {
-  server = createApp(openDb(':memory:'), { jwtSecret: SECRET }).listen(0);
+  server = createApp(openDb(':memory:'), { jwtSecret: SECRET, authLimit: HIGH, loginEmailLimit: HIGH }).listen(0);
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => new Promise((r) => server.close(r)));
@@ -202,4 +204,44 @@ test('monthly summary totals are exact and grouped by category', async () => {
     { category: 'Food', total: '0.30', count: 2 },
   ]);
   assert.equal((await call('GET', '/reports/summary?month=2024-13', { token })).status, 400);
+});
+
+// ---- throttling, proxy, landing page -----------------------------------------
+async function withApp(options, fn) {
+  const s = createApp(openDb(':memory:'), { jwtSecret: SECRET, ...options }).listen(0);
+  const url = `http://127.0.0.1:${s.address().port}`;
+  try { await fn(url); } finally { await new Promise((r) => s.close(r)); }
+}
+const postJson = (url, path, body, headers = {}) =>
+  fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+
+test('auth endpoints are rate limited per client IP', async () => {
+  await withApp({ authLimit: { max: 3, windowMs: 60_000 }, loginEmailLimit: HIGH }, async (url) => {
+    const statuses = [];
+    for (let i = 0; i < 5; i++) statuses.push((await postJson(url, '/auth/login', { email: `u${i}@example.com`, password: 'x' })).status);
+    assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
+    const limited = await postJson(url, '/auth/login', { email: 'a@example.com', password: 'x' });
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
+  });
+});
+
+test('login attempts are limited per account even from different IPs', async () => {
+  await withApp({ authLimit: HIGH, loginEmailLimit: { max: 3, windowMs: 60_000 }, trustProxy: 1 }, async (url) => {
+    const statuses = [];
+    for (let i = 0; i < 5; i++) {
+      // Each attempt claims a different client IP; the account is still throttled.
+      statuses.push((await postJson(url, '/auth/login', { email: 'Victim@Example.com', password: 'guess' }, { 'x-forwarded-for': `203.0.113.${i}` })).status);
+    }
+    assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
+    // A different account is unaffected.
+    assert.equal((await postJson(url, '/auth/login', { email: 'other@example.com', password: 'guess' }, { 'x-forwarded-for': '203.0.113.99' })).status, 401);
+  });
+});
+
+test('root serves the demo page and the server does not advertise Express', async () => {
+  const res = await fetch(`${base}/`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.equal(res.headers.get('x-powered-by'), null);
+  assert.match(await res.text(), /Expense Tracker API/);
 });

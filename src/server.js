@@ -10,9 +10,15 @@ if (!jwtSecret || jwtSecret.length < 16) {
   process.exit(1);
 }
 
+const hops = Number(process.env.TRUST_PROXY || 0);
+if (!Number.isInteger(hops) || hops < 0) {
+  console.error('TRUST_PROXY must be a non-negative integer (number of proxies in front of the app).');
+  process.exit(1);
+}
+
 const db = openDb();
-const server = createApp(db, { jwtSecret }).listen(port, () => {
-  console.log(`Expense tracker API listening on http://localhost:${port}`);
+const server = createApp(db, { jwtSecret, trustProxy: hops || false }).listen(port, () => {
+  console.log(`Expense tracker API listening on port ${port}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
