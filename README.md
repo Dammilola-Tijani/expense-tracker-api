@@ -25,8 +25,21 @@ npm test
 | `JWT_SECRET` | yes      | n/a            | Signing key for tokens (min 16 chars)          |
 | `PORT`       | no       | `3000`         | HTTP port                                      |
 | `DB_FILE`    | no       | `expenses.db`  | SQLite file path                               |
+| `TRUST_PROXY`| no       | `0` (none)     | Number of reverse proxies in front of the app, so rate limiting sees the real client IP |
 
 The server refuses to start without a strong `JWT_SECRET` rather than falling back to a guessable default.
+
+## Deploying (Render)
+
+The repo includes a `render.yaml` blueprint. On Render, either use **New → Blueprint** with this repo, or create a **Web Service** manually with build command `npm install`, start command `npm start`, health check path `/health`, and these environment variables:
+
+| Variable      | Value                                  |
+| ------------- | -------------------------------------- |
+| `NODE_VERSION`| `24`                                   |
+| `TRUST_PROXY` | `1` (Render's load balancer is one proxy) |
+| `JWT_SECRET`  | a long random string (never commit it) |
+
+The free tier sleeps when idle, so the first request after a pause can take about a minute.
 
 ## API
 
@@ -34,6 +47,7 @@ All routes except `/auth/*` and `/health` need `Authorization: Bearer <token>`. 
 
 | Method | Path                    | Description                                        |
 | ------ | ----------------------- | -------------------------------------------------- |
+| GET    | `/`                     | Small demo page for trying the API in a browser    |
 | POST   | `/auth/register`        | Create an account                                  |
 | POST   | `/auth/login`           | Get a 1-hour JWT                                   |
 | POST   | `/categories`           | Create a category                                  |
@@ -115,6 +129,15 @@ Authentication ("who are you?") is easy to get right while authorization ("is th
 - JWT verification **pins the algorithm** (`HS256`), so a token can't choose its own, such as `alg: none`.
 - Tests cover missing, garbage, expired, and wrong-secret tokens.
 
+### 5. Slowing down password guessing
+Without a limit, anyone can try thousands of passwords against `/auth/login`.
+
+- Auth endpoints are limited **per client IP** (20 requests per 15 minutes).
+- Login is *also* limited **per account** (10 attempts per 15 minutes), so an attacker who rotates IP addresses still can't keep guessing one account's password. Tests cover both.
+- Rejected requests get `429` with a `Retry-After` header.
+- Trade-off: a per-account limit lets someone deliberately lock a victim out of logging in for a while. For this project I judged throttling guessing more important than that risk; a production system would add things like CAPTCHAs or progressive delays.
+- Behind a hosting provider's proxy, every request appears to come from the proxy. `TRUST_PROXY` tells Express how many proxies to trust so the limiter sees the real client IP (setting it too high would let clients spoof their IP).
+
 ## Design decisions and trade-offs
 
 - **SQLite:** zero setup so anyone can clone and run it. The SQL is standard, and moving to Postgres would mainly mean swapping the driver and the date functions.
@@ -126,12 +149,13 @@ Authentication ("who are you?") is easy to get right while authorization ("is th
 
 Intentionally out of scope, and what I'd do next:
 
-- **No rate limiting on `/auth/login`**, so it's open to brute-force attempts. I'd add per-IP and per-account throttling.
+- **The rate limiter is in memory.** It resets on restart and isn't shared between instances; multiple instances would need a shared store such as Redis.
 - **No refresh tokens or revocation.** Tokens are valid for 1 hour and can't be invalidated early.
 - **Single currency**, with no multi-currency support.
 - **Single-process SQLite.** Fine for one server, but horizontal scaling means moving to Postgres.
 - **Migrations are `CREATE TABLE IF NOT EXISTS`.** A real project should use a migration tool.
 - Email addresses aren't verified.
+- **Demo data is not durable.** Free hosts wipe the SQLite file on restart or redeploy.
 
 ## Project layout
 
@@ -141,6 +165,8 @@ src/
   app.js      routes, validation, authorization
   auth.js     password hashing, JWT sign/verify, auth middleware
   money.js    cents parsing/formatting, date validation
+  rateLimit.js  fixed-window limiter (per IP or per key)
+  page.js     demo page served at /
   db.js       schema
 test/
   app.test.js end-to-end tests against an in-memory database
