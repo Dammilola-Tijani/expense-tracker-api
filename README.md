@@ -4,6 +4,8 @@ A REST API for tracking personal expenses, with JWT authentication, per-user dat
 
 Built with Node.js, Express, and SQLite (via Node's built-in `node:sqlite`). Small on purpose: the goal was to get the *backend fundamentals* right: money handling, auth, authorization, and pagination.
 
+**Live demo:** https://expense-tracker-api-qc1d.onrender.com (free tier: the first request after idle can take about a minute, and data may be reset. Please don't use a real password.)
+
 ## Quick start
 
 Requires Node.js 22.5+ (uses the built-in `node:sqlite` and test runner).
