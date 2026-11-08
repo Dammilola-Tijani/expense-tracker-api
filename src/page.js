@@ -9,14 +9,17 @@ export const landingPage = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Expense Tracker API</title>
 <style>
-  body { font: 16px/1.6 system-ui, sans-serif; max-width: 680px; margin: 2.5rem auto; padding: 0 1rem; color: #1f1f1f; }
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 780px; margin: 2.5rem auto; padding: 0 1rem; color: #1f1f1f; }
   h1 { font-size: 1.5rem; margin-bottom: .25rem; }
   h2 { font-size: 1.05rem; margin: 1.75rem 0 .5rem; }
   p.sub, footer { color: #555; }
   footer { margin-top: 2rem; font-size: .9rem; }
   form, .row { display: flex; flex-wrap: wrap; gap: 8px; margin: .5rem 0; }
   input, select { padding: 9px; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; min-width: 0; }
-  input { flex: 1 1 140px; }
+  input { flex: 1 1 130px; }
+  #amount { flex: 1 1 110px; }
+  #desc { flex: 2 1 180px; }
+  #cat { flex: 1 1 130px; }
   button { padding: 9px 14px; font-size: 1rem; border: 0; border-radius: 6px; background: #1f1f1f; color: #fff; cursor: pointer; }
   button.alt { background: #e6e6e6; color: #1f1f1f; }
   .msg { min-height: 1.4em; font-size: .95rem; color: #2a6b2a; }
@@ -30,7 +33,7 @@ export const landingPage = `<!doctype html>
 </head>
 <body>
 <h1>Expense Tracker API</h1>
-<p class="sub">A demo front end for the API. Create an account, add some expenses, and see the monthly summary. Data may be reset at any time, so don't use a real password.</p>
+<p class="sub">A demo front end for the API. Create an account, add some expenses in naira (₦), and see the monthly summary. Data may be reset at any time, so don't use a real password.</p>
 
 <section id="authBox">
   <div class="row">
@@ -49,7 +52,7 @@ export const landingPage = `<!doctype html>
 
   <h2>Add an expense</h2>
   <form id="expForm">
-    <input id="amount" placeholder="Amount (12.50)" inputmode="decimal" required>
+    <input id="amount" placeholder="Amount (₦)" inputmode="decimal" required>
     <input id="date" type="date" required>
     <input id="desc" placeholder="Description (optional)" maxlength="200">
     <select id="cat"><option value="">No category</option></select>
@@ -84,6 +87,9 @@ export const landingPage = `<!doctype html>
     for (var i = 2; i < arguments.length; i++) n.append(arguments[i]);
     return n;
   }
+  // Display only: the API sends exact decimal strings and the page just formats them as naira.
+  var naira = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' });
+  function money(s) { return naira.format(Number(s)); }
   function msg(id, text, isErr) { var n = $(id); n.textContent = text; n.className = isErr ? 'msg err' : 'msg'; }
 
   async function api(method, path, body) {
@@ -131,7 +137,7 @@ export const landingPage = `<!doctype html>
       $('list').append(el('li', {},
         el('span', {}, e.description || '(no description)',
           el('small', {}, e.date + (e.category ? ' · ' + e.category.name : ''))),
-        el('strong', {}, e.amount)));
+        el('strong', {}, money(e.amount))));
     });
     cursor = r.nextCursor; $('moreBtn').hidden = !cursor;
     if (reset && !r.data.length) $('list').append(el('li', {}, 'No expenses yet.'));
@@ -140,10 +146,10 @@ export const landingPage = `<!doctype html>
 
   async function loadSummary() {
     var s = await api('GET', '/reports/summary?month=' + encodeURIComponent($('month').value));
-    var box = $('summary'); box.replaceChildren(el('div', { className: 'total' }, s.total),
+    var box = $('summary'); box.replaceChildren(el('div', { className: 'total' }, money(s.total)),
       el('div', { className: 'sub' }, s.count + ' expense(s)'));
     var ul = el('ul');
-    s.byCategory.forEach(function (c) { ul.append(el('li', {}, el('span', {}, c.category), el('strong', {}, c.total))); });
+    s.byCategory.forEach(function (c) { ul.append(el('li', {}, el('span', {}, c.category), el('strong', {}, money(c.total)))); });
     box.append(ul);
   }
   $('month').onchange = function () { loadSummary().catch(function (e) { msg('expMsg', e.message, true); }); };

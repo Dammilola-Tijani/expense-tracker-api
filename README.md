@@ -102,7 +102,7 @@ curl "$BASE/reports/summary?month=2024-03" -H "authorization: Bearer $TOKEN"
 ### 1. Money without floating-point errors
 `0.1 + 0.2 !== 0.3` in JavaScript, and `19.99 * 100` is `1998.9999999999998`. Summing floats in a finance app accumulates errors.
 
-- Amounts are stored as **integer cents** with a `CHECK (amount_cents > 0)` constraint.
+- Amounts are in Nigerian naira (₦) and stored as **integer kobo** (1/100 of a naira; the column is named `amount_cents` because the technique is the same for any currency) with a `CHECK (amount_cents > 0)` constraint.
 - Input is parsed from its *decimal string* form with a strict regex and string splitting, with no multiplication by 100.
 - Values with more than 2 decimals (`1.999`) are **rejected** instead of silently rounded, since silently changing a user's number is worse than an error.
 - The API returns amounts as strings (`"12.50"`) so clients don't reintroduce float drift.
@@ -153,7 +153,7 @@ Intentionally out of scope, and what I'd do next:
 
 - **The rate limiter is in memory.** It resets on restart and isn't shared between instances; multiple instances would need a shared store such as Redis.
 - **No refresh tokens or revocation.** Tokens are valid for 1 hour and can't be invalidated early.
-- **Single currency**, with no multi-currency support.
+- **Single currency (Nigerian naira).** Amounts carry no currency field, and there's no multi-currency support or conversion.
 - **Single-process SQLite.** Fine for one server, but horizontal scaling means moving to Postgres.
 - **Migrations are `CREATE TABLE IF NOT EXISTS`.** A real project should use a migration tool.
 - Email addresses aren't verified.
@@ -166,7 +166,7 @@ src/
   server.js   entry point: config check, startup, graceful shutdown
   app.js      routes, validation, authorization
   auth.js     password hashing, JWT sign/verify, auth middleware
-  money.js    cents parsing/formatting, date validation
+  money.js    amount (kobo) parsing/formatting, date validation
   rateLimit.js  fixed-window limiter (per IP or per key)
   page.js     demo page served at /
   db.js       schema
